@@ -1,0 +1,191 @@
+/*
+ * Análisis léxico y sintáctico de compilar BASIC 
+ * Marco Chávez
+ */
+%{
+open BasicAST
+
+let mutable lineNumber = ref 1
+%}
+
+// The start token becomes a parser function in the compiled code.
+%start start
+
+// Tokens with no additional information for the AST. 
+%token LPAREN RPAREN THEN EOF COMM EOL
+
+// Tokens that include an int to store their line number and in some cases an
+// additional value.
+%token <int> GRTR LESS EQUAL DIF
+%token <int> MINUS PLUS TIMES READ DATA REM DIV POWER
+%token <int * string> SIN COS TAN ATN EXP ABS LOG SQR RND INT
+%token <int> IF PRINT LET END DIM RETURN GOSUB STOP GOTO NEXT DEF FOR TO STEP 
+%token <int * string> LABEL
+%token <int * string> ID FN
+%token <float> NUM
+
+// This is the type of the data produced by a successful reduction
+// of the 'start' symbol:
+%type <Prog> start
+
+%%
+
+start: 
+      program EOL EOF { $1 }
+    | program EOF { $1 }
+    
+program: 
+    statement_list { Program ($1) } 
+
+statement_list:
+      { [] } 
+    | statement statement_list { $1::$2 }
+    
+statement: 
+      assignment { $1 }
+    | print      { $1 }
+    | condition  { $1 }
+    | end_p      { $1 }
+    | dim        { $1 }
+    | return_p   { $1 }
+    | go_sub     { $1 }
+    | stop       { $1 }
+    | goto       { $1 }
+    | next_p     { $1 }
+    | defn       { $1 }
+    | for_p      { $1 }
+    | read_p     { $1 }
+    | data_p     { $1 }
+    | rem_p      { $1 }
+
+rem_p:
+    NUM REM EOL { Rem (Position($2, int($1))) }
+                                       
+data_p:
+    NUM DATA num_list EOL { Data (Position($2, int($1)), $3) }
+      
+num_list:
+      NUM  { [Number($1)] }
+    | NUM COMM  { [Number($1)]  }
+    | NUM COMM num_list { Number($1)::$3 }
+                                
+read_p:
+    NUM READ variable_list EOL { Read (Position($2, int($1)), $3) }
+
+variable_list:
+      variable_t                    { [$1] } 
+    | variable_t COMM               { [$1] }
+    | variable_t COMM variable_list { $1::$3 }
+
+variable_t:
+      ID                                   { let line, id = $1
+                                             Escalar(line, id) }
+    | ID LPAREN expression RPAREN                        { let line, id = $1
+                                                           Vector(line, id, $3) }
+    | ID LPAREN expression COMM expression RPAREN        { let line, id = $1
+                                                           Matrix(line, id, $3, $5) }
+
+for_p:
+      NUM FOR ID EQUAL expression TO expression EOL { let line, id = $3
+                                                      For(Position($2, int($1)), Escalar(line, id), $5, $7, Number(1.0))}
+    | NUM FOR ID EQUAL expression TO expression STEP expression EOL { let line, id = $3
+                                                                      For(Position($2, int($1)), Escalar(line, id), $5, $7, $9)}
+
+next_p:  
+    NUM NEXT ID EOL { let line, id = $3
+                      Next(Position($2, int($1)), Escalar(line, id)) }
+
+defn:
+    NUM DEF FN LPAREN ID RPAREN EQUAL expression EOL { let line, var = $5  
+                                                       let line, fn = $3 
+                                                       Defn(Position(line, int($1)), fn, Escalar(line, var), $8) } 
+goto:
+    NUM GOTO NUM EOL { GoTo (Position($2, int($1)), $3) }
+    
+stop:
+    NUM STOP EOL { Stop (Position($2, int($1))) }
+    
+go_sub:
+    NUM GOSUB NUM EOL { GoSub (Position($2, int($1)), $3) }
+    
+return_p:
+    NUM RETURN EOL { Return (Position($2, int($1))) }
+    
+end_p:
+    NUM END EOL { End (Position($2, int($1))) }
+    | NUM END { End (Position($2, int($1))) }
+
+assignment:
+    NUM LET variable_t EQUAL expression EOL { Let (Position($2, int($1)), $3, $5) }
+                                  
+dim:
+    NUM DIM dim_list EOL                { Dim (Position($2, int($1)), $3) }
+
+dim_list:
+      ID LPAREN NUM RPAREN              { let line, id = $1
+                                          let num = $3 + 1.0
+                                          [Vector(line, id, Number(num))] 
+                                        }
+
+    | ID LPAREN NUM COMM NUM RPAREN     { let line, id = $1
+                                          let num1 = $3 + 1.0
+                                          let num2 = $5 + 1.0
+                                          [Matrix(line, id, Number(num1), Number(num2))] 
+                                         }
+    | dim_list COMM dim_list            { $1@$3 }                          
+
+print:
+      NUM PRINT print_list EOL { Print (Position($2, int($1)), $3) }
+    | NUM PRINT EOL { Print (Position($2, int($1)), []) }  
+      
+print_list:
+      expression { [$1] }
+    | expression COMM { [$1] }   
+    | expression print_list{ $1::$2 }
+    | expression COMM print_list { $1::$3 }
+    
+
+condition:
+    NUM IF relational THEN NUM EOL { Condition (Position($2, int($1)), $3, $5) } 
+                               
+relational:
+      expression LESS expression  { Less  ($2, $1, $3) }
+    | expression GRTR expression  { Grtr  ($2, $1, $3) }
+    | expression EQUAL expression { Equal ($2, $1, $3) }
+    | expression LESS EQUAL expression { Leq ($2, $1, $4) }
+    | expression GRTR EQUAL expression { Geq ($2, $1, $4) }
+    | expression DIF expression { Dif ($2, $1, $3) }
+
+expression:
+      expression MINUS term       { Minus ($2, $1, $3) }
+    | expression PLUS term        { Plus ($2, $1, $3) }
+    | term                        { $1 }
+
+term:
+      term TIMES simple_expression { Times ($2, $1, $3) }
+    | term DIV simple_expression   { Divided ($2, $1, $3) }
+    | term POWER simple_expression { Power ($2, $1, $3) }
+    | simple_expression           { $1 }
+    
+simple_expression:
+      variable_t                    { $1 }
+    | NUM                           { Number $1 }
+    | LPAREN expression RPAREN      { $2 }
+    | LABEL                         { Label $1 }  
+    | functions LPAREN expression RPAREN { let line, fn = $1
+                                           Function(line, fn, $3) }
+    | functions LPAREN RPAREN { let line, fn = $1
+                                Function(line, fn, Number(0.0)) }
+
+functions:
+      FN  { $1 }
+    | SIN { $1 }
+    | COS { $1 }
+    | TAN { $1 }
+    | ATN { $1 }
+    | EXP { $1 }
+    | ABS { $1 }
+    | LOG { $1 }
+    | SQR { $1 }
+    | RND { $1 }
+    | INT { $1 }

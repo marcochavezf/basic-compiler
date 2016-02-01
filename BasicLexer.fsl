@@ -1,0 +1,87 @@
+(*
+ * Análisis léxico y sintáctico de compilar BASIC 
+ * Marco Chávez
+ *)
+{
+module BasicLexer
+
+open BasicParser
+open Microsoft.FSharp.Text.Lexing
+
+// This function takes a lexer buffer and returns a string with the lexeme
+// of the most recently recognized token.
+let lexeme = LexBuffer<char>.LexemeString
+}
+
+let digit       = ['0'-'9']
+let number	= digit+
+let literal     = '-'?number? ('.'number)? ('E''-'?number)?
+let alpha       = ['A'-'Z']
+let ident       = alpha+['0'-'9']*
+let whitespace  = ' ' | '\t' | '\r'
+let comilla     = '\"'
+let newline     = '\n'
+let newlines    = newline+
+let comment     = "REM"[^'\n']*
+let label	= comilla[' ''\t''^''\r''=''A'-'Z''0'-'9''#''$''%''&''/''('')''?''¡''!''¿''.'':']*comilla
+let fun         = "FN"['A'-'Z']
+
+(*
+    You can refer to a predefined variable (visible only inside the 
+    rule) named "lexbuf" that is the instantiation of the 
+    Microsoft.FSharp.Text.Lexing.LexBuffer type.
+*)
+rule token = parse
+    | whitespace { token lexbuf }
+    | newline    { incr lineNumber
+                   EOL }
+    | label      { LABEL (!lineNumber, lexeme lexbuf)}
+    | "("        { LPAREN }
+    | ")"        { RPAREN }
+    | "-"        { MINUS !lineNumber }
+    | literal    { NUM (float(lexeme lexbuf)) }
+    | "<"        { LESS !lineNumber }
+    | ">"        { GRTR !lineNumber }
+    | "+"        { PLUS !lineNumber }
+    | "*"        { TIMES !lineNumber }
+    | "/"        { DIV !lineNumber }
+    | "="        { EQUAL !lineNumber }
+    | "^"        { POWER !lineNumber }
+    | "<>"       { DIF !lineNumber }
+    | "SIN"      { SIN (!lineNumber, lexeme lexbuf) }
+    | "COS"      { COS (!lineNumber, lexeme lexbuf) }
+    | "TAN"      { TAN (!lineNumber, lexeme lexbuf) }
+    | "ATN"      { ATN (!lineNumber, lexeme lexbuf) }
+    | "EXP"      { EXP (!lineNumber, lexeme lexbuf) }
+    | "ABS"      { ABS (!lineNumber, lexeme lexbuf) }
+    | "LOG"      { LOG (!lineNumber, lexeme lexbuf) }
+    | "SQR"      { SQR (!lineNumber, lexeme lexbuf) }
+    | "RND"      { RND (!lineNumber, lexeme lexbuf) }
+    | "INT"      { INT (!lineNumber, lexeme lexbuf) }
+    | "IF"       { IF !lineNumber }
+    | "THEN"     { THEN }
+    | "END"      { END !lineNumber }
+    | "PRINT"    { PRINT !lineNumber }
+    | "LET"      { LET !lineNumber }
+    | "DIM"      { DIM !lineNumber }
+    | "RETURN"   { RETURN !lineNumber }
+    | "GOSUB"    { GOSUB !lineNumber }
+    | "STOP"     { STOP !lineNumber }
+    | "GOTO"     { GOTO !lineNumber }
+    | "NEXT"     { NEXT !lineNumber }
+    | "DEF"      { DEF !lineNumber }
+    | fun        { FN (!lineNumber, lexeme lexbuf) }
+    | "FOR"      { FOR !lineNumber }
+    | "TO"       { TO !lineNumber }
+    | "STEP"     { STEP !lineNumber }
+    | "READ"     { READ !lineNumber }
+    | "DATA"     { DATA !lineNumber }
+    | comment    { REM !lineNumber }
+    | ","        { COMM }
+    | ident      { // Make sure to put this case after all other reserved
+                   // words which would conflict with the definition of an
+                   // identifier.
+                   ID (!lineNumber, lexeme lexbuf)
+                 }                     
+    | eof        { EOF }
+    | _          { failwithf "'%s' is an invalid input character" (lexeme lexbuf) }
